@@ -1,0 +1,14 @@
+{
+  "name": "gitmark-marketplace",
+  "owner": {
+    "name": "Valera Kovalskii"
+  },
+  "description": "GitMark Memory Bank — knowledge-base tooling for Claude Code.",
+  "plugins": [
+    {
+      "name": "gitmark",
+      "source": ".",
+      "description": "md+README+git knowledge base: FTS5 search (bm25 + trigram/fuzzy), HTML+graph generation, code-ontology linter."
+    }
+  ]
+}

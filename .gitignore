@@ -1,0 +1,8 @@
+# GitMark derived search index — regenerated from md via `gitmark index`
+.gitmark/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+.DS_Store
