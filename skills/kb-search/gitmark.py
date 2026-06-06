@@ -63,6 +63,9 @@ def iter_md(root: Path):
 def area_of(rel: str) -> str:
     parts = rel.split("/")
     if parts[0] == "docs":
+        # docs/services/<svc> разносим по сервисам (отдельная группа/цвет), прочее — docs/<sub>
+        if len(parts) > 3 and parts[1] == "services":
+            return "docs/services/" + parts[2]
         return "docs/" + parts[1] if len(parts) > 2 else "docs"
     if parts[0] == "services" and len(parts) > 1:
         return "services/" + parts[1]
@@ -201,19 +204,24 @@ def _fts_match_query(query: str) -> str:
     return " OR ".join(f'"{t}"*' for t in terms)
 
 
-def _trigrams(s: str) -> list:
-    """Перекрывающиеся 3-граммы по словам запроса (для fuzzy-матча по trigram-fts5)."""
-    grams, seen = [], set()
+def _fuzzy_phrases(s: str) -> list:
+    """Фразы из пар соседних 3-грамм = 4-символьные подстроки запроса.
+
+    Матч по 4-символьным окнам (а не одиночным 3-граммам) отсекает мусор: опечатка
+    сохраняет длинные общие подстроки (`firecraker`↔`firecracker`: `fire`,`ecra`),
+    а случайная строка делит с доками лишь разрозненные частые 3-граммы (`ent`,`non`).
+    """
+    wins, seen = [], set()
     for w in WORD_RE.findall(s.lower()):
-        if len(w) < 3:
+        if len(w) < 4:
             continue
-        for i in range(len(w) - 2):
-            g = w[i:i + 3]
-            if '"' in g or g in seen:
+        for i in range(len(w) - 3):
+            win = w[i:i + 4]            # 4-символьное окно; FTS5-trigram сам разложит
+            if '"' in win or win in seen:
                 continue
-            seen.add(g)
-            grams.append(g)
-    return grams
+            seen.add(win)
+            wins.append(win)
+    return wins
 
 
 def cmd_search(root: Path, query: str, k: int = 8) -> list:
@@ -254,23 +262,30 @@ def cmd_search(root: Path, query: str, k: int = 8) -> list:
                                     "via": "trigram"}
         except sqlite3.OperationalError:
             pass
-        # (b) fuzzy: OR по 3-граммам запроса — bm25 ранжирует по числу совпавших
-        # n-грамм → ловит опечатки/морфологию/кириллицу (вес 0.3)
-        grams = _trigrams(query)
+        # (b) fuzzy: OR по 4-символьным окнам запроса → опечатки/морфология/кириллица.
+        # Порог покрытия: чанк принимается, только если содержит ≥50% (и ≥2) различных
+        # 4-грамм запроса — отсекает мусор, цепляющий 1 случайное частое окно (вес 0.3).
+        grams = _fuzzy_phrases(query)
         if grams:
             fq = " OR ".join(f'"{g}"' for g in grams)
+            need = max(1, (len(grams) + 4) // 5)   # ≥ceil(20% окон): коротким хватает 1
+                                                   # (серединная опечатка), длинным — больше
             try:
-                for path, heading, lineno, snip, score in con.execute(
+                for path, heading, lineno, snip, body, score in con.execute(
                     "SELECT path,heading,lineno,"
-                    "snippet(tri,3,'»','«','…',14), bm25(tri) "
+                    "snippet(tri,3,'»','«','…',14), body, bm25(tri) "
                     "FROM tri WHERE tri MATCH ? ORDER BY bm25(tri) LIMIT ?",
-                    (fq, k * 2),
+                    (fq, k * 3),
                 ):
                     key = (path, lineno)
-                    if key not in results:
-                        results[key] = {"path": path, "heading": heading, "line": int(lineno),
-                                        "snippet": " ".join(snip.split()), "score": -float(score) * 0.3,
-                                        "via": "fuzzy"}
+                    if key in results:
+                        continue
+                    bl = body.lower()
+                    if sum(1 for g in grams if g in bl) < need:
+                        continue
+                    results[key] = {"path": path, "heading": heading, "line": int(lineno),
+                                    "snippet": " ".join(snip.split()), "score": -float(score) * 0.3,
+                                    "via": "fuzzy"}
             except sqlite3.OperationalError:
                 pass
     con.close()
@@ -443,8 +458,9 @@ def cmd_map(root: Path, out: Path) -> dict:
         except Exception:
             continue
         raw[rel] = text
+        body = FM_RE.sub("", text, count=1)   # не рендерить YAML-frontmatter как текст
         files[rel] = {"rel": rel, "area": area_of(rel), "title": title_of(text, rel),
-                      "size": len(text.encode("utf-8")), "html": render(text)}
+                      "size": len(text.encode("utf-8")), "html": render(body)}
     known = set(files)
     for rel, text in raw.items():
         seen = set()
@@ -618,7 +634,8 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 #main{display:flex;height:calc(100vh - 53px)}
 #side{flex:0 0 320px;overflow:auto;border-right:1px solid var(--border);background:var(--panel);padding:8px 0}
 .grp{padding:7px 14px 3px;font-family:var(--mono);font-size:11.5px;color:var(--muted);text-transform:uppercase;cursor:pointer;display:flex;justify-content:space-between;position:sticky;top:0;background:var(--panel)}
-.grp:hover{color:var(--fg)}.it{padding:4px 14px 4px 26px;cursor:pointer;font-size:13.5px;border-left:2px solid transparent;color:#cfcfcf}
+.grp:hover{color:var(--fg)}.grp .car{display:inline-block;width:10px;color:var(--muted);font-size:10px}
+.it{padding:4px 14px 4px 26px;cursor:pointer;font-size:13.5px;border-left:2px solid transparent;color:#cfcfcf}
 .it:hover{background:var(--panel2)}.it.on{border-left-color:var(--accent);background:var(--panel2);color:#fff}
 .it .p{display:block;font-family:var(--mono);font-size:10.5px;color:var(--muted)}.hidden{display:none}
 #doc{flex:1;overflow:auto;padding:34px 44px 80px}#docwrap{max-width:860px;margin:0 auto}
@@ -635,6 +652,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 #legend .row{display:flex;align-items:center;gap:7px;margin:3px 0}#legend .dot{width:10px;height:10px;border-radius:50%}
 #tip{position:absolute;pointer-events:none;background:#000;border:1px solid var(--accent);border-radius:6px;padding:6px 9px;font-family:var(--mono);font-size:12px;max-width:340px;display:none}
 #tip .s{color:var(--muted);font-size:10.5px}
+#gctl{position:absolute;top:12px;right:12px;background:rgba(18,18,18,.92);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-family:var(--mono);font-size:12px;display:flex;flex-direction:column;gap:6px}
+#gctl label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--muted)}#gctl label:hover{color:var(--fg)}
+#gctl input{accent-color:var(--accent);cursor:pointer}#gctl #reheat{color:var(--accent);border-top:1px solid var(--border);padding-top:6px}
+#ghint{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);background:rgba(18,18,18,.85);border:1px solid var(--border);border-radius:7px;padding:5px 12px;font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap}
 </style></head><body>
 <div id="top"><h1>🧠 GitMark · __ROOTNAME__</h1><span class="stat" id="stat"></span>
 <div class="tabs"><div class="tab on" data-v="browse">Дерево</div><div class="tab" data-v="graph">Граф</div></div>
@@ -642,27 +663,48 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 <div id="main">
   <div id="side"></div>
   <div id="doc"><div id="docwrap"><div id="crumb"></div><div class="md" id="mdbody"></div></div></div>
-  <div id="gp" class="hidden"><canvas id="cv"></canvas><div id="legend"></div><div id="tip"></div></div>
+  <div id="gp" class="hidden"><canvas id="cv"></canvas><div id="legend"></div>
+    <div id="gctl">
+      <label><input type="checkbox" id="showref" checked> ссылки между доками</label>
+      <label><input type="checkbox" id="showown" checked> папка→док</label>
+      <label><input type="checkbox" id="physics"> свободный режим (гравитация)</label>
+      <label id="reheat">↻ пересобрать рост</label>
+    </div>
+    <div id="ghint">🕸 центр = точка входа · ЛКМ-таскать · колесо-зум · клик по точке → открыть док</div>
+    <div id="tip"></div></div>
 </div>
 <script>
 const DATA=__DATA__,F=DATA.files,$=s=>document.querySelector(s);
-const COL={docs:'#00ff88',services:'#7c9cff',root:'#9aa0a6'};
-function grp(a){return a.startsWith('docs')?'docs':a.startsWith('services')?'services':'root';}
+// группа узла = сервис (docs/services/<svc> или services/<svc>), иначе docs/root.
+function svcOf(a){const m=a.match(/^docs\/services\/([^/]+)/)||a.match(/^services\/([^/]+)/);return m?m[1]:null;}
+function grp(a){return svcOf(a)||(a.startsWith('docs')?'docs':'root');}
+const PAL=['#7c9cff','#ff6ec7','#ffb454','#4ec9ff','#c586ff','#f7768e','#9ece6a','#e0af68','#bb9af7','#73daca','#ff9e64','#7dcfff'];
+const _cc={};
+function colorOf(g){if(g==='docs')return '#00ff88';if(g==='root')return '#9aa0a6';
+ if(_cc[g])return _cc[g];let h=0;for(let i=0;i<g.length;i++)h=(h*31+g.charCodeAt(i))>>>0;return _cc[g]=PAL[h%PAL.length];}
+const COL=new Proxy({},{get:(_,k)=>colorOf(k)});  // COL[grp(area)] совместимость
 function esc(s){return(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
 $('#stat').textContent=DATA.stats.files+' файлов · '+DATA.stats.areas+' папок · '+DATA.stats.refs+' ссылок · '+(DATA.stats.bytes/1024).toFixed(0)+' KB';
 const byArea={};DATA.nodes.filter(n=>n.kind==='doc').forEach(n=>{(byArea[n.area]=byArea[n.area]||[]).push(n);});
 const side=$('#side');
 Object.keys(byArea).sort().forEach(a=>{const items=byArea[a].sort((x,y)=>x.rel.localeCompare(y.rel));
- const g=document.createElement('div');g.className='grp';g.innerHTML='<span style="color:'+COL[grp(a)]+'">'+a+'</span><span>'+items.length+'</span>';side.appendChild(g);
- const box=document.createElement('div');items.forEach(n=>{const d=document.createElement('div');d.className='it';d.dataset.rel=n.rel;
-  d.innerHTML=esc(n.label)+'<span class="p">'+esc(n.rel)+'</span>';d.onclick=()=>open(n.rel);box.appendChild(d);});side.appendChild(box);g.onclick=()=>box.classList.toggle('hidden');});
+ const g=document.createElement('div');g.className='grp';
+ g.innerHTML='<span><span class="car">▸</span> <span style="color:'+COL[grp(a)]+'">'+a+'</span></span><span>'+items.length+'</span>';side.appendChild(g);
+ const box=document.createElement('div');box.className='gbox hidden';  // свёрнуто по умолчанию
+ items.forEach(n=>{const d=document.createElement('div');d.className='it';d.dataset.rel=n.rel;
+  d.innerHTML=esc(n.label)+'<span class="p">'+esc(n.rel)+'</span>';d.onclick=()=>open(n.rel);box.appendChild(d);});side.appendChild(box);
+ g.onclick=()=>{const h=box.classList.toggle('hidden');g.querySelector('.car').textContent=h?'▸':'▾';};});
 function open(rel){const f=F[rel];if(!f)return;$('#mdbody').innerHTML=f.html;
  $('#crumb').innerHTML='<b>'+esc(f.area)+'</b> / '+esc(rel.split('/').pop())+' · '+(f.size/1024).toFixed(1)+' KB';
  document.querySelectorAll('.it').forEach(x=>x.classList.toggle('on',x.dataset.rel===rel));
+ const act=document.querySelector('.it.on');if(act){const bx=act.parentElement;if(bx.classList.contains('hidden')){bx.classList.remove('hidden');const gg=bx.previousElementSibling,c=gg&&gg.querySelector('.car');if(c)c.textContent='▾';}}
  $('#mdbody').querySelectorAll('a[href]').forEach(an=>{const h=an.getAttribute('href');const b=(h||'').split('#')[0].split('/').pop();
   const hit=Object.keys(F).filter(r=>r.endsWith('/'+b)||r===b);if(b&&b.endsWith('.md')&&hit.length===1){an.onclick=e=>{e.preventDefault();open(hit[0]);$('#doc').scrollTop=0;};}});
  $('#doc').scrollTop=0;}
-$('#search').oninput=e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('.it').forEach(it=>{it.style.display=it.textContent.toLowerCase().includes(q)?'':'none';});};
+$('#search').oninput=e=>{const q=e.target.value.toLowerCase();
+ document.querySelectorAll('.it').forEach(it=>{it.style.display=it.textContent.toLowerCase().includes(q)?'':'none';});
+ document.querySelectorAll('.gbox').forEach(b=>b.classList.toggle('hidden',!q));      // при поиске разворачиваем, пусто — сворачиваем
+ document.querySelectorAll('.grp .car').forEach(c=>c.textContent=q?'▾':'▸');};
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
  const g=t.dataset.v==='graph';$('#side').classList.toggle('hidden',g);$('#doc').classList.toggle('hidden',g);$('#gp').classList.toggle('hidden',!g);if(g){resize();if(!G.on)startG();}});
 /* радиальный граф */
@@ -671,24 +713,34 @@ function resize(){const r=cv.getBoundingClientRect();cv.width=r.width*devicePixe
 addEventListener('resize',()=>{if(!$('#gp').classList.contains('hidden'))resize();});
 function layout(){const cx=G.W/2,cy=G.H/2,gap=Math.min(G.W,G.H)*0.46/(G.maxlvl+2);G.cx=cx;G.cy=cy;G.gap=gap;
  G.nodes.forEach(n=>{n.tx=n.root?cx:cx+n.lvl*gap*Math.cos(n.ang);n.ty=n.root?cy:cy+n.lvl*gap*Math.sin(n.ang);});}
-function startG(){G.on=true;const idx={};G.nodes=DATA.nodes.map((n,i)=>{idx[n.id]=i;return{...n,x:G.W/2,y:G.H/2,
+function startG(){G.on=true;const idx={};G.nodes=DATA.nodes.map((n,i)=>{idx[n.id]=i;return{...n,x:G.W/2,y:G.H/2,vx:0,vy:0,
  r:n.root?13:(n.kind==='area'?7:3+Math.min(6,Math.sqrt(n.size/1100))),col:n.root?'#fff':COL[grp(n.area)]};});
  G.edges=DATA.edges.map(e=>({s:idx[e.s],t:idx[e.t],kind:e.kind,tree:e.tree})).filter(e=>e.s!=null&&e.t!=null);
  layout();legend();G.grow=0;loop();}
-function loop(){if(G.grow<1)G.grow=Math.min(1,G.grow+0.02);const g=1-Math.pow(1-G.grow,3);
- G.nodes.forEach(n=>{if(n===G.drag)return;n.x+=(G.cx+(n.tx-G.cx)*g-n.x)*0.14;n.y+=(G.cy+(n.ty-G.cy)*g-n.y)*0.14;});draw();requestAnimationFrame(loop);}
+function spider(){if(G.grow<1)G.grow=Math.min(1,G.grow+0.02);const g=1-Math.pow(1-G.grow,3);
+ G.nodes.forEach(n=>{if(n===G.drag)return;n.x+=(G.cx+(n.tx-G.cx)*g-n.x)*0.14;n.y+=(G.cy+(n.ty-G.cy)*g-n.y)*0.14;});}
+function physics(){const N=G.nodes,rep=2200,k=.045;
+ for(let i=0;i<N.length;i++){const a=N[i];for(let j=i+1;j<N.length;j++){const b=N[j];let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy+.01,d=Math.sqrt(d2),f=rep/d2;a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;}}
+ G.edges.forEach(e=>{const a=N[e.s],b=N[e.t];let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)+.01,L=e.kind==='own'?70:150,f=(d-L)*k*(e.kind==='own'?1.4:.5);a.vx+=dx/d*f;a.vy+=dy/d*f;b.vx-=dx/d*f;b.vy-=dy/d*f;});
+ N.forEach(n=>{n.vx+=(G.W/2-n.x)*.001;n.vy+=(G.H/2-n.y)*.001;if(n===G.drag)return;n.x+=n.vx*=.85;n.y+=n.vy*=.85;});}
+function loop(){($('#physics').checked?physics:spider)();draw();requestAnimationFrame(loop);}
 function draw(){ctx.clearRect(0,0,G.W,G.H);const v=G.view;ctx.save();ctx.translate(v.x,v.y);ctx.scale(v.k,v.k);
- ctx.strokeStyle='rgba(255,255,255,.04)';for(let l=1;l<=G.maxlvl;l++){ctx.beginPath();ctx.arc(G.cx,G.cy,l*G.gap*(1-Math.pow(1-G.grow,3)),0,7);ctx.stroke();}
- G.edges.forEach(e=>{if(e.tree)return;const a=G.nodes[e.s],b=G.nodes[e.t];ctx.strokeStyle=e.kind==='ref'?'rgba(0,255,136,.13)':'rgba(120,120,120,.07)';ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();});
- G.edges.forEach(e=>{if(!e.tree)return;const a=G.nodes[e.s],b=G.nodes[e.t],par=a.lvl<=b.lvl?a:b,hot=G.hover&&(a===G.hover||b===G.hover);
+ const sr=$('#showref').checked,so=$('#showown').checked,phys=$('#physics').checked;
+ if(!phys){ctx.strokeStyle='rgba(255,255,255,.04)';for(let l=1;l<=G.maxlvl;l++){ctx.beginPath();ctx.arc(G.cx,G.cy,l*G.gap*(1-Math.pow(1-G.grow,3)),0,7);ctx.stroke();}}
+ G.edges.forEach(e=>{if(e.tree||(e.kind==='ref'&&!sr)||(e.kind==='own'&&!so))return;const a=G.nodes[e.s],b=G.nodes[e.t];ctx.strokeStyle=e.kind==='ref'?'rgba(0,255,136,.13)':'rgba(120,120,120,.07)';ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();});
+ G.edges.forEach(e=>{if(!e.tree||(e.kind==='ref'&&!sr)||(e.kind==='own'&&!so))return;const a=G.nodes[e.s],b=G.nodes[e.t],par=a.lvl<=b.lvl?a:b,hot=G.hover&&(a===G.hover||b===G.hover);
   ctx.strokeStyle=hot?'rgba(255,255,255,.7)':(COL[grp(par.area)]+'66');ctx.lineWidth=hot?1.6:1;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();});
  G.nodes.forEach(n=>{if(n.root){ctx.beginPath();ctx.arc(n.x,n.y,n.r+7,0,7);ctx.fillStyle='rgba(255,255,255,.1)';ctx.fill();}
   ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,7);ctx.fillStyle=n.col;ctx.fill();if(n.kind==='area'||n.root){ctx.strokeStyle=n.root?'#00ff88':'#000';ctx.lineWidth=n.root?2:1.4;ctx.stroke();}
   if(n.root||n.kind==='area'||n===G.hover||v.k>1.7){ctx.fillStyle=n.root?'#00ff88':(n===G.hover?'#fff':'#bdbdbd');ctx.font=((n.root||n.kind==='area')?'600 ':'')+(n.root?13:11)+'px '+getComputedStyle(document.body).getPropertyValue('--mono');
    ctx.fillText(n.root?(DATA.root+' ◀ вход'):(n.kind==='area'?n.label:n.label.slice(0,30)),n.x+n.r+4,n.y+3);}});ctx.restore();}
-function legend(){$('#legend').innerHTML='<div class="row" style="color:#00ff88">● '+DATA.root+' = вход</div>'+
- Object.entries({docs:'docs/*',services:'services/*',root:'корень/прочее'}).map(([k,v])=>'<div class="row"><span class="dot" style="background:'+COL[k]+'"></span>'+v+'</div>').join('')+
- '<div class="row" style="color:var(--muted)">кольцо = шагов от входа</div>';}
+function legend(){const groups={};DATA.nodes.forEach(n=>{const g=grp(n.area);groups[g]=(groups[g]||0)+1;});
+ const rank=x=>x==='docs'?1:x==='root'?2:0;  // сервисы первыми, docs/root в конце
+ const order=Object.keys(groups).sort((a,b)=>rank(a)-rank(b)||a.localeCompare(b));
+ const lbl={docs:'docs/* (сквозное)',root:'корень/прочее'};
+ $('#legend').innerHTML='<div class="row" style="color:#00ff88">● '+DATA.root+' = вход</div>'+
+  order.map(g=>'<div class="row"><span class="dot" style="background:'+colorOf(g)+'"></span>'+(lbl[g]||g)+' <span style="color:var(--muted)">'+groups[g]+'</span></div>').join('')+
+  '<div class="row" style="color:var(--muted);margin-top:4px">кольцо = шагов от входа</div>';}
 function tw(mx,my){return{x:(mx-G.view.x)/G.view.k,y:(my-G.view.y)/G.view.k};}
 function pick(mx,my){const w=tw(mx,my);let b=null,bd=1e9;G.nodes.forEach(n=>{const d=(n.x-w.x)**2+(n.y-w.y)**2;if(d<bd&&d<(n.r+6)**2){bd=d;b=n;}});return b;}
 cv.addEventListener('mousedown',e=>{const r=cv.getBoundingClientRect();const n=pick(e.clientX-r.left,e.clientY-r.top);G.moved=false;if(n){G.drag=n;G.ds={x:e.clientX,y:e.clientY};}else G.pan={x:e.clientX,y:e.clientY,vx:G.view.x,vy:G.view.y};});
@@ -699,6 +751,8 @@ cv.addEventListener('mousemove',e=>{const r=cv.getBoundingClientRect(),mx=e.clie
   tip.innerHTML='<div>'+esc(n.root?DATA.root:n.label)+'</div><div class="s">'+esc(n.kind==='area'?n.area:(n.rel||'')+' · '+n.lvl+' шаг(ов)')+'</div>';}else tip.style.display='none';});
 addEventListener('mouseup',()=>{if(G.drag){const n=G.drag;G.drag=null;if(!G.moved&&n.kind==='doc'){document.querySelector('.tab[data-v=browse]').click();open(n.rel);}}G.pan=null;});
 cv.addEventListener('wheel',e=>{e.preventDefault();const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,f=e.deltaY<0?1.12:.89,w=tw(mx,my);G.view.k=Math.max(.3,Math.min(5,G.view.k*f));G.view.x=mx-w.x*G.view.k;G.view.y=my-w.y*G.view.k;},{passive:false});
+$('#reheat').onclick=()=>{if(!G.on)return;layout();G.nodes.forEach(n=>{n.x=G.cx;n.y=G.cy;n.vx=0;n.vy=0;});G.grow=0;};
+$('#physics').onchange=()=>{if(!$('#physics').checked&&G.on){layout();G.grow=1;}};
 open(DATA.files[DATA.root]?DATA.root:Object.keys(F)[0]);
 </script></body></html>"""
 
