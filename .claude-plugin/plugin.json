@@ -1,13 +1,13 @@
 {
   "name": "gitmark",
-  "description": "GitMark Memory Bank — md+README+git knowledge base with FTS5 search (bm25 + trigram/fuzzy), HTML/graph generation, and a code-ontology linter.",
+  "description": "OntoShip — ontology-driven docs that ship: a md+git knowledge base (FTS5 search, HTML graph, ontology linter) plus the spec-driven dev-flow built on it. CLI/plugin: gitmark.",
   "version": "0.1.0",
   "author": {
     "name": "Valera Kovalskii",
     "url": "https://github.com/vakovalskii"
   },
-  "homepage": "https://github.com/vakovalskii/gitmark-memory-bank",
-  "repository": "https://github.com/vakovalskii/gitmark-memory-bank",
+  "homepage": "https://github.com/vakovalskii/ontoship",
+  "repository": "https://github.com/vakovalskii/ontoship",
   "license": "MIT",
   "keywords": ["knowledge-base", "fts5", "search", "markdown", "ontology", "claude-code"]
 }

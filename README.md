@@ -1,4 +1,4 @@
-# GitMark Memory Bank
+# OntoShip
 
 > **A project knowledge base is just `markdown` + a `README` index + `git`.** Nothing simpler works better.
 
@@ -71,7 +71,7 @@ fuzzy/substring/non-Latin matching — detected automatically, degrades graceful
 ## Install as a Claude Code plugin
 
 ```text
-/plugin marketplace add vakovalskii/gitmark-memory-bank
+/plugin marketplace add vakovalskii/ontoship
 /plugin install gitmark@gitmark-marketplace
 ```
 

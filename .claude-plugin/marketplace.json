@@ -3,7 +3,7 @@
   "owner": {
     "name": "Valera Kovalskii"
   },
-  "description": "GitMark Memory Bank — knowledge-base tooling for Claude Code.",
+  "description": "OntoShip — ontology-driven docs + spec-driven dev-flow for Claude Code.",
   "plugins": [
     {
       "name": "gitmark",
