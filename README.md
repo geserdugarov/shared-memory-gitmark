@@ -47,7 +47,7 @@ right file instead of grepping blind.
 
 OntoShip ships as a Claude Code **marketplace with two plugins** — `gitmark` (KB + dev-flow) and `destructive-guard` (safety hook).
 
-**`gitmark`** — three skills and three commands:
+**`gitmark`** — three skills and four commands:
 
 | skill | what |
 |---|---|
@@ -62,6 +62,7 @@ editing, and ships changes through one repeatable, gated flow built around the K
 |---|---|
 | `/kb` | search the KB (FTS5) and answer from the top hits |
 | `/kb-map` | build the self-contained HTML graph of the KB and open it |
+| `/doc` | compose/update a KB doc following the ontology (wraps `kb-curate`) |
 | `/ship` | run the dev-flow on a feature/fix: research → … → ship (MR → dev → main) |
 
 ### What to write after a command (for best results)
@@ -75,6 +76,11 @@ The argument after the command is the prompt — be specific, results scale with
 
 **`/kb-map [output-path]`** — usually nothing (defaults to `docs-map.html`).
 - Optional path: `/kb-map build/graph.html`.
+
+**`/doc <topic / what to document>`** — name the thing to write up; the agent picks the
+node_type+folder, writes frontmatter + typed links, and indexes it.
+- Good: `/doc how the billing webhook verifies the YooKassa signature`, `/doc decision: drop Firecracker-per-session`.
+- It searches first and **edits** an existing doc instead of duplicating.
 
 **`/ship <what + why + done>`** — describe the change as fully as you can; this is what makes
 the dev-flow good. Include **what** to do, **why** (the goal), and the **done-criteria**, and
