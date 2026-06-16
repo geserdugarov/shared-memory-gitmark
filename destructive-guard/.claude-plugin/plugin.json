@@ -1,0 +1,10 @@
+{
+  "name": "destructive-guard",
+  "description": "Детект команд на удаление (rm, rmdir, shred, git rm/clean/reset --hard/push --force, docker rm/volume rm/prune/compose down -v, SQL DROP/TRUNCATE/DELETE FROM) → запрос подтверждения y/n. Работает даже в bypassPermissions. Звук + macOS-баннер при детекте. Разбор по токенам — без ложных срабатываний на perform/transform/terraform.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Valera Kovalskii"
+  },
+  "homepage": "https://github.com/vakovalskii/destructive-guard",
+  "license": "MIT"
+}

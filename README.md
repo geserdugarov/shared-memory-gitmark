@@ -45,7 +45,9 @@ right file instead of grepping blind.
 | `lint` | *(optional)* ontology checks: broken links, frontmatter, folder READMEs |
 | `version` | — |
 
-Plus a **Claude Code plugin** with three skills and a `/kb` command:
+OntoShip ships as a Claude Code **marketplace with two plugins** — `gitmark` (KB + dev-flow) and `destructive-guard` (safety hook).
+
+**`gitmark`** — three skills and three commands:
 
 | skill | what |
 |---|---|
@@ -55,6 +57,17 @@ Plus a **Claude Code plugin** with three skills and a `/kb` command:
 
 So the agent searches the KB instead of grepping, follows light curation rules when
 editing, and ships changes through one repeatable, gated flow built around the KB.
+
+| command | what |
+|---|---|
+| `/kb` | search the KB (FTS5) and answer from the top hits |
+| `/kb-map` | build the self-contained HTML graph of the KB and open it |
+| `/ship` | run the dev-flow on a feature/fix: research → … → ship (MR → dev → main) |
+
+**`destructive-guard`** — a `PreToolUse` Bash hook that intercepts destructive commands
+(`rm`, `git reset --hard`, `docker rm -v`, SQL `DROP/TRUNCATE`) and forces a y/n
+confirmation **even in bypassPermissions**, with sound + a macOS banner. Token-level
+parsing — no false positives on `perform`/`transform`/`terraform`.
 
 ## Quickstart
 
@@ -73,6 +86,7 @@ fuzzy/substring/non-Latin matching — detected automatically, degrades graceful
 ```text
 /plugin marketplace add vakovalskii/ontoship
 /plugin install gitmark@gitmark-marketplace
+/plugin install destructive-guard@gitmark-marketplace   # optional: the safety hook
 ```
 
 Or just copy `skills/` and `commands/` into your repo's `.claude/` — project-local, no
