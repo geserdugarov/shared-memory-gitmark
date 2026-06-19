@@ -1,3 +1,14 @@
+---
+node_type: reference
+title: GitMark ontology — a knowledge model over code
+service: _platform
+status: active
+updated: 2026-06-16
+tags: [ontology, palantir, node-type, links, frontmatter]
+links:
+  relates_to: [services/kb-curate/README.md, services/gitmark-cli/README.md, reference/architecture.md]
+---
+
 # GitMark ontology — a knowledge model over code
 
 > Rules for **how to maintain** a knowledge base (not just how to search it). The idea
